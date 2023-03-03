@@ -5,13 +5,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import geopandas as gpd
-import geopy
-from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
 
 import streamlit as st
 
 st.title("SEC visualisation")
+
+import streamlit as st
+import pandas as pd
 
 path = '/Users/matthesfogtmann/Downloads/SEC data/'
 
@@ -82,15 +82,18 @@ def getFinacialData(filename=path+'2022q4'):
     #return pd.DataFrame.from_dict(f(data, names)).T
 
 def combineReports(reports):
-    dic = {}
-    for report_name, report in reports.items():
-        for company in report.keys():
-            if company not in dic:
-                dic[company] = {report_name:report[company]}
-            else:
-                dic[company][report_name] = report[company]
-    # concat each index to each other            
-    return pd.concat({k: pd.DataFrame(v).T for k,v in dic.items()},axis=0)
+    reformed_dic = {}
+
+    for report, level1 in reports.items():
+        for company,level2 in level1.items():
+            for stmt, level3 in level2.items():
+                for tag, value in level3.items():
+                    key = (company,stmt,tag)
+                    if key not in reformed_dic:
+                        reformed_dic[key] = {}
+                    reformed_dic[key][report] = value
+                    
+    return pd.DataFrame.from_dict(reformed_dic, orient='index')
 
 @np.vectorize
 def timeString2float(x="2020q2"):
@@ -102,8 +105,54 @@ def timeString2date(x="2020q2"):
     lst = x.split("q")
     return f"{lst[0]}-{int(lst[1])*3}-15"
 
-df = pd.read_csv("data/SEC_data.csv",index_col=[0,1],header=[0,1])
-df
+def getTicker(company_name):
+    
+    yfinance = "https://query2.finance.yahoo.com/v1/finance/search"
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+    params = {"q": company_name, "quotes_count": 1, "country": "United States"}
+
+    res = requests.get(url=yfinance, params=params, headers={'User-Agent': user_agent})
+    data = res.json()
+
+    company_code = data['quotes'][0]['symbol']
+    return company_code
+
+def getCompanyInfo():
+    # sort from oldest to newest
+    files = [i for i in getDir(path)]
+    files.sort(reverse=True)
+    info_dic = dict()
+    for report in files:
+        df = pd.read_csv(f"{path}/{i}/sub.txt",sep="\t")
+        companies = sorted(list(set(df["name"])))
+
+        for company in companies[:40]:
+            if company not in info_dic:
+                info_dic[company] = dict()
+                data = df[df["name"]==company].sort_values(["form","period","filed"]).iloc[0]
+
+                # get location
+                loc = ", ".join([str(data["bas1"]),str(data["cityba"]),str(data["stprma"])])
+
+                cord = gpd.tools.geocode(loc)
+                cord = cord.to_crs(epsg = 5070)  # convert to Conus Albers
+                info_dic[company]["long"] = float(cord["geometry"].centroid.x)
+                info_dic[company]["lat"] = float(cord["geometry"].centroid.y)
+
+                # get ticker
+                try:
+                    info_dic[company]["ticker"] = getTicker(company)
+                except:
+                    pass
+
+            else:
+                pass
+
+    return pd.DataFrame.from_dict(info_dic)
+
+df = pd.read_csv("/Users/matthesfogtmann/Documents/GitHub/OpenBloom/data/SEC_data.csv",index_col=[0,1,2],header=[0]).T
+
+
 
 options = [i for i in set(np.array(list(df.columns))[:,0])]
 companies = st.multiselect(label="Search for company",options=options)
@@ -112,13 +161,27 @@ companies = st.multiselect(label="Search for company",options=options)
 stmt_dic = {"BS" : "Balance Sheet", "IS" : "Income Statement", "CF" : "Cash Flow", "EQ" : "Equity",
  "CI": "Comprehensive Income", "UN" : "Unclassifiable Statement", "CP" :"Cover Page"}
 
-cols = st.columns(4)
+inv_stmt_dic = {v: k for k, v in stmt_dic.items()}
+st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center}</style>', unsafe_allow_html=True)
+statement2look = inv_stmt_dic[st.radio(options=inv_stmt_dic.keys(),label= "Statement")]
 
-stms = {short : cols[i%4].checkbox(stmt) for i, (short,stmt) in enumerate(stmt_dic.items())}
-stmts_selected = []
-for i in stms:
-    if stms[i]:
-        stmts_selected.append(i)
+if len(companies)==1:
+    try:
+        data = df[companies[0]][statement2look].T
+        st.write(data)
+    except KeyError:
+        st.write("No data")
+
+else:
+    cols = st.columns(len(companies))
+    for company in companies:
+        try:
+            data = df[company][statement2look].T
+            st.subheader(company)
+            st.write(data)
+        except KeyError:
+            st.write("No data")  
+st.write(len(companies))
 
 if len(companies)>0:
     st.dataframe(df[companies[0]][['IS', 'CI', 'UN']])
