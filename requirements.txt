@@ -5,6 +5,7 @@ numpy==1.21.4
 streamlit
 tqdm == 4.65.0
 datetime
+geopandas == 0.12.2
 folium == 0.14.0
 streamlit_folium == 0.11.1
 yfinance == 0.2.12
