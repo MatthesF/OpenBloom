@@ -178,8 +178,8 @@ def getCompanyInfo():
 
     return pd.DataFrame.from_dict(info_dic)
 
-df = pd.read_csv("/Users/matthesfogtmann/Documents/GitHub/OpenBloom/data/SEC_data.csv",index_col=[0,1,2],header=[0]).T
-info_df = pd.read_csv('/Users/matthesfogtmann/Documents/GitHub/OpenBloom/data/company_info.csv')
+df = pd.read_csv("data/SEC_data.csv",index_col=[0,1,2],header=[0]).T
+info_df = pd.read_csv('data/company_info.csv')
 options = sorted(set([i[0] for i in set(list(df.columns))]))
 company = st.multiselect(label="Search for company",options=options, max_selections=1)
 
