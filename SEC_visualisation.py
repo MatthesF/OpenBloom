@@ -3,15 +3,22 @@ from tqdm import tqdm
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import datetime
+import plotly.graph_objs as go 
+from plotly.subplots import make_subplots
+import time
+
 
 import geopandas as gpd
+import folium
 
 import streamlit as st
+from streamlit_folium import st_folium
+
+import yfinance as yf
+
 
 st.title("SEC visualisation")
-
-import streamlit as st
-import pandas as pd
 
 path = '/Users/matthesfogtmann/Downloads/SEC data/'
 
@@ -95,6 +102,27 @@ def combineReports(reports):
                     
     return pd.DataFrame.from_dict(reformed_dic, orient='index')
 
+def comapnyFolium(company,info_df):
+    company_df = info_df[company]
+    longitude = company_df.iloc[3]
+    latitude = company_df.iloc[2]
+    st.write(" -\n".join([company[0],company_df.iloc[0][0]]))
+    loc = folium.Map(location=[longitude,latitude], zoom_start=10)
+    folium.Marker(
+        [longitude, latitude], 
+        popup=company[0], 
+        tooltip=company[0]
+    ).add_to(loc)
+    
+    # call to render Folium map in Streamlit
+    map = st_folium(loc,width=800)
+
+    return map
+
+def companyDataframe(company,statement2look):
+    data = df[company[0]][statement2look].T.sort_index(axis=1, ascending=False)
+    return st.dataframe(data)
+
 @np.vectorize
 def timeString2float(x="2020q2"):
     lst = x.split("q")
@@ -103,7 +131,7 @@ def timeString2float(x="2020q2"):
 @np.vectorize
 def timeString2date(x="2020q2"):
     lst = x.split("q")
-    return f"{lst[0]}-{int(lst[1])*3}-15"
+    return datetime.strptime(f"{lst[0]}-{int(lst[1])*3}-15","%Y-%m-%d")
 
 def getTicker(company_name):
     
@@ -151,12 +179,9 @@ def getCompanyInfo():
     return pd.DataFrame.from_dict(info_dic)
 
 df = pd.read_csv("/Users/matthesfogtmann/Documents/GitHub/OpenBloom/data/SEC_data.csv",index_col=[0,1,2],header=[0]).T
-
-
-
-options = [i for i in set(np.array(list(df.columns))[:,0])]
-companies = st.multiselect(label="Search for company",options=options)
-
+info_df = pd.read_csv('/Users/matthesfogtmann/Documents/GitHub/OpenBloom/data/company_info.csv')
+options = sorted(set([i[0] for i in set(list(df.columns))]))
+company = st.multiselect(label="Search for company",options=options, max_selections=1)
 
 stmt_dic = {"BS" : "Balance Sheet", "IS" : "Income Statement", "CF" : "Cash Flow", "EQ" : "Equity",
  "CI": "Comprehensive Income", "UN" : "Unclassifiable Statement", "CP" :"Cover Page"}
@@ -165,28 +190,25 @@ inv_stmt_dic = {v: k for k, v in stmt_dic.items()}
 st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center}</style>', unsafe_allow_html=True)
 statement2look = inv_stmt_dic[st.radio(options=inv_stmt_dic.keys(),label= "Statement")]
 
-if len(companies)==1:
-    try:
-        data = df[companies[0]][statement2look].T
-        st.write(data)
-    except KeyError:
-        st.write("No data")
+# try to plot company location on map
+try:
+    comapnyFolium(company,info_df)
+except:
+    pass
 
-else:
-    cols = st.columns(len(companies))
-    for company in companies:
-        try:
-            data = df[company][statement2look].T
-            st.subheader(company)
-            st.write(data)
-        except KeyError:
-            st.write("No data")  
-st.write(len(companies))
+# try to plot company financial data
+try:
+    companyDataframe(company,statement2look)
+except:
+    st.write("No data")
 
-if len(companies)>0:
-    st.dataframe(df[companies[0]][['IS', 'CI', 'UN']])
 
-tags_options = set([i for i in np.array(list(df.index))[:,0]])
+
+
+#if len(companies)>0:
+    #st.dataframe(df[companies[0]][['IS', 'CI', 'UN']])
+
+#tags_options = set([i for i in np.array(list(df.index))[:,0]])
 
 
 
@@ -197,7 +219,6 @@ def plotCompanyTag(companies="1 800 FLOWERS COM INC",tags="Assets"):
         lst = x.split("q")
         num = int(lst[0])+(int(lst[1])-1)*0.25
         return num
-
 
 
     if len(tags)>1:
@@ -238,9 +259,135 @@ def plotCompanyTag(companies="1 800 FLOWERS COM INC",tags="Assets"):
     st.pyplot(fig)
 
     
-    
-if len(companies)>0:
-    tags = st.multiselect(label="What tag",options=tags_options)
-    if len(tags)>0:
+#if len(companies)>0:
+    #tags = st.multiselect(label="What tag",options=tags_options)
+    #if len(tags)>0:
 
-        plotCompanyTag(companies,tags)
+        #plotCompanyTag(companies,tags)
+
+
+def plotStock(company_df,stock,period,interval,window,placeholder="No"):
+    stock = company_df.iloc[0].values[0]
+    df = yf.download(tickers=stock,period=period,interval=interval)
+
+    WINDOW = window
+    df['sma'] = df['Close'].rolling(WINDOW).mean()
+    df['std'] = df['Close'].rolling(WINDOW).std(ddof = 0)
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                vertical_spacing=0.1, subplot_titles=('Stock Price', 'Volume'), 
+                row_width=[0.2, 0.7])
+
+    fig.add_trace(go.Candlestick(x=df.index,
+                    open=df['Open'],
+                    high=df['High'],
+                    low=df['Low'],
+                    close=df['Close'], name = 'market data'), 
+                row=1, col=1)
+    
+    fig.add_trace(go.Line(x=df.index,
+                             y=df['Close'],
+                            name = 'market data fill',
+                            visible="legendonly",
+                            fill='tozeroy'), 
+                row=1, col=1)
+
+    # Moving average
+    fig.add_trace(go.Scatter(x = df.index,
+                            y = df['sma'],
+                            line_color = 'black',
+                            name = 'sma',
+                            visible="legendonly"), 
+                row=1, col=1)
+
+    # Upper Bound
+    fig.add_trace(go.Scatter(x = df.index,
+                            y = df['sma'] + (df['std'] * 2),
+                            line_color = 'yellow',
+                            name = 'upper band',
+                            opacity = 0.2,
+                            visible="legendonly",
+                            legendgroup='bounds'), 
+                row=1, col=1)
+
+    # Lower Bound fill in between with parameter 'fill': 'tonexty'
+    fig.add_trace(go.Scatter(x = df.index,
+                            y = df['sma'] - (df['std'] * 2),
+                            line_color = 'orange',
+                            fill = 'tonexty',
+                            name = 'lower band',
+                            opacity = 0.2,
+                            visible="legendonly",
+                            legendgroup='bounds'), 
+                row=1, col=1)
+    
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], showlegend=False, name = 'volume'), row=2, col=1)
+
+
+    fig.update_layout(
+        title= str(stock)+' Live Share Price:',
+        yaxis_title='Stock Price (USD per Shares)',
+        template="ggplot2")           
+
+    fig.update_xaxes(rangebreaks=[dict(bounds=[16, 9.5], pattern="hour"), dict(bounds=["sat", "mon"])],
+                    rangeslider_visible=False,
+                    )
+    if placeholder=="No":
+        st.plotly_chart(fig)
+    else:
+        placeholder.plotly_chart(fig)
+    return df[['Close',"Open"]]
+
+company_df = info_df[company]
+
+yf.pdr_override() 
+
+try:
+    stock = company_df.iloc[0].values[0]
+except:
+    pass
+
+
+
+try:
+
+    if type(stock) == str:
+        
+        period = st.radio(options=["1d (Live)","5d","1mo","3mo","6mo","ytd","1y","5y","max"],label="Period",index=1)
+
+        window = st.number_input("Window for rolling mean",value=50)
+        metric_placeholder = st.empty()
+        placeholder = st.empty()
+
+        while period == "1d (Live)":
+            df = plotStock(company_df,stock,"1d","1m",window,placeholder)
+            metric_placeholder.metric(label=f"{stock} price", value=round(df["Close"].iloc[-1], 2), delta=f"{ round(df['Close'].iloc[-1]-df['Open'].iloc[0],2)} ({round((df['Close'].iloc[-1] - df['Open'].iloc[0]) / df['Open'].iloc[0] * 100, 2)}%)")
+            if period != "1d (Live)":
+                break
+                
+
+        if period == "5d":
+            plotStock(company_df,stock,"5d","5m",window,placeholder)
+        
+        elif period == "1mo":
+            plotStock(company_df,stock,"1mo","5m",window)
+
+        elif period == "3mo":
+            plotStock(company_df,stock,"3mo","1h",window)
+
+        elif period == "6mo":
+            plotStock(company_df,stock,"6mo","1h",window)
+
+        elif period == "ytd":
+            plotStock(company_df,stock,"ytd","1h",window)
+
+        elif period == "1y":
+            plotStock(company_df,stock,"1y","1h",window)
+            
+        elif period == "5y":
+            plotStock(company_df,stock,"5y","1mo",window)
+
+        elif period == "max":
+            plotStock(company_df,stock,"max","1mo",window)
+except:
+    pass
