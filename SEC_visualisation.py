@@ -16,9 +16,21 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 import yfinance as yf
+from pygooglenews import GoogleNews
 
 
-st.title("SEC visualisation")
+st.set_page_config(page_title = "OpenBloom",layout="wide")
+
+st.markdown("""
+<style>
+body {
+    background-color: #F5F5F5;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+st.title("OpenBloom")
 
 path = '/Users/matthesfogtmann/Downloads/SEC data/'
 
@@ -102,20 +114,21 @@ def combineReports(reports):
                     
     return pd.DataFrame.from_dict(reformed_dic, orient='index')
 
-def comapnyFolium(company,info_df):
+def comapnyFolium(company,info_df,cols):
     company_df = info_df[company]
     longitude = company_df.iloc[3]
     latitude = company_df.iloc[2]
     st.write(" -\n".join([company[0],company_df.iloc[0][0]]))
-    loc = folium.Map(location=[longitude,latitude], zoom_start=10)
+    loc = folium.Map(location=[longitude,latitude], zoom_start=10,)
     folium.Marker(
         [longitude, latitude], 
         popup=company[0], 
         tooltip=company[0]
     ).add_to(loc)
     
+    with cols[0]:
     # call to render Folium map in Streamlit
-    map = st_folium(loc,width=800)
+        map = st_folium(loc,width=300,height=300)
 
     return map
 
@@ -178,38 +191,22 @@ def getCompanyInfo():
 
     return pd.DataFrame.from_dict(info_dic)
 
+
+
 df = pd.read_csv("data/SEC_data.csv",index_col=[0,1,2],header=[0]).T
 info_df = pd.read_csv('data/company_info.csv')
 options = sorted(set([i[0] for i in set(list(df.columns))]))
-company = st.multiselect(label="Search for company",options=options, max_selections=1)
 
-stmt_dic = {"BS" : "Balance Sheet", "IS" : "Income Statement", "CF" : "Cash Flow", "EQ" : "Equity",
- "CI": "Comprehensive Income", "UN" : "Unclassifiable Statement", "CP" :"Cover Page"}
+cols = st.columns((4,10,4))
 
-inv_stmt_dic = {v: k for k, v in stmt_dic.items()}
-st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center}</style>', unsafe_allow_html=True)
-statement2look = inv_stmt_dic[st.radio(options=inv_stmt_dic.keys(),label= "Statement")]
+with cols[0]:
+    company = st.multiselect(label="Search for company",options=options, max_selections=1)
 
 # try to plot company location on map
 try:
-    comapnyFolium(company,info_df)
+    comapnyFolium(company,info_df,cols)
 except:
     pass
-
-# try to plot company financial data
-try:
-    companyDataframe(company,statement2look)
-except:
-    st.write("No data")
-
-
-
-
-#if len(companies)>0:
-    #st.dataframe(df[companies[0]][['IS', 'CI', 'UN']])
-
-#tags_options = set([i for i in np.array(list(df.index))[:,0]])
-
 
 
 def plotCompanyTag(companies="1 800 FLOWERS COM INC",tags="Assets"):
@@ -257,13 +254,6 @@ def plotCompanyTag(companies="1 800 FLOWERS COM INC",tags="Assets"):
             ax.set_ylabel(tags[0])
     fig.tight_layout()
     st.pyplot(fig)
-
-    
-#if len(companies)>0:
-    #tags = st.multiselect(label="What tag",options=tags_options)
-    #if len(tags)>0:
-
-        #plotCompanyTag(companies,tags)
 
 
 def plotStock(company_df,stock,period,interval,window,placeholder="No"):
@@ -346,48 +336,89 @@ try:
     stock = company_df.iloc[0].values[0]
 except:
     pass
+with cols[1]:
+    try:
+        if type(stock) == str:
+            metric_placeholder = st.empty()
+            placeholder = st.empty()
+            period_place = st.empty()
+            period = period_place.radio(options=["1d (Live)","5d","1mo","3mo","6mo","ytd","1y","5y","max"],label="Period",index=1,horizontal=True)
 
+            #window = st.number_input("Window for rolling mean",value=50)
+            window = 50
 
+            while period == "1d (Live)":
+                df = plotStock(company_df,stock,"1d","1m",window,placeholder)
+                metric_placeholder.metric(label=f"{stock} price", value=round(df["Close"].iloc[-1], 2), delta=f"{ round(df['Close'].iloc[-1]-df['Open'].iloc[0],2)} ({round((df['Close'].iloc[-1] - df['Open'].iloc[0]) / df['Open'].iloc[0] * 100, 2)}%)")
+                if period != "1d (Live)":
+                    break
+                    
+
+            if period == "5d":
+                plotStock(company_df,stock,"5d","5m",window,placeholder)
+            
+            elif period == "1mo":
+                plotStock(company_df,stock,"1mo","5m",window,placeholder)
+
+            elif period == "3mo":
+                plotStock(company_df,stock,"3mo","1h",window,placeholder)
+
+            elif period == "6mo":
+                plotStock(company_df,stock,"6mo","1h",window,placeholder)
+
+            elif period == "ytd":
+                plotStock(company_df,stock,"ytd","1h",window,placeholder)
+
+            elif period == "1y":
+                plotStock(company_df,stock,"1y","1h",window,placeholder)
+                
+            elif period == "5y":
+                plotStock(company_df,stock,"5y","1mo",window,placeholder)
+
+            elif period == "max":
+                plotStock(company_df,stock,"max","1mo",window,placeholder)
+
+            dic = dict()
+            gn = GoogleNews()
+            s = gn.search(f'{company} {stock} stock news')
+            news_dict = dict()
+            for entry in s["entries"]:
+                news_dict[entry['published']] = f"[{entry['title']}]({entry['link']})"
+            sorted_dict = dict(sorted(news_dict.items(), key=lambda x: datetime.strptime(x[0], '%a, %d %b %Y %H:%M:%S %Z'),reverse=True))          
+            for news in sorted_dict.values():
+                if "apple" in news.lower():
+                    st.write(news)
+
+            
+    except:
+        pass
 
 try:
+    with cols[2]:
+        fig = plt.figure()
+        plt.plot(df[company[0]]["BS"].index,df[company[0]]["BS"]["Assets"].values)
+        st.pyplot(fig)
+        plt.close()
+except:
+    pass
 
-    if type(stock) == str:
-        
-        period = st.radio(options=["1d (Live)","5d","1mo","3mo","6mo","ytd","1y","5y","max"],label="Period",index=1)
+stmt_dic = {"BS" : "Balance Sheet", "IS" : "Income Statement", "CF" : "Cash Flow", "EQ" : "Equity",
+"CI": "Comprehensive Income", "UN" : "Unclassifiable Statement", "CP" :"Cover Page"}
 
-        window = st.number_input("Window for rolling mean",value=50)
-        metric_placeholder = st.empty()
-        placeholder = st.empty()
+inv_stmt_dic = {v: k for k, v in stmt_dic.items()}
 
-        while period == "1d (Live)":
-            df = plotStock(company_df,stock,"1d","1m",window,placeholder)
-            metric_placeholder.metric(label=f"{stock} price", value=round(df["Close"].iloc[-1], 2), delta=f"{ round(df['Close'].iloc[-1]-df['Open'].iloc[0],2)} ({round((df['Close'].iloc[-1] - df['Open'].iloc[0]) / df['Open'].iloc[0] * 100, 2)}%)")
-            if period != "1d (Live)":
-                break
-                
+try:
+    if type(company[0]) == str:
+        with st.expander("Finacial Data"):
+            st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center}</style>', unsafe_allow_html=True)
+            statement2look = inv_stmt_dic[st.radio(options=inv_stmt_dic.keys(),label= "Statement")]
 
-        if period == "5d":
-            plotStock(company_df,stock,"5d","5m",window,placeholder)
-        
-        elif period == "1mo":
-            plotStock(company_df,stock,"1mo","5m",window)
-
-        elif period == "3mo":
-            plotStock(company_df,stock,"3mo","1h",window)
-
-        elif period == "6mo":
-            plotStock(company_df,stock,"6mo","1h",window)
-
-        elif period == "ytd":
-            plotStock(company_df,stock,"ytd","1h",window)
-
-        elif period == "1y":
-            plotStock(company_df,stock,"1y","1h",window)
-            
-        elif period == "5y":
-            plotStock(company_df,stock,"5y","1mo",window)
-
-        elif period == "max":
-            plotStock(company_df,stock,"max","1mo",window)
+            # try to plot company financial data
+            try:
+                companyDataframe(company,statement2look)
+            except:
+                st.write("No data")
+    else:
+        pass
 except:
     pass
