@@ -9,6 +9,6 @@ geopandas == 0.12.2
 folium == 0.14.0
 streamlit_folium == 0.11.1
 yfinance == 0.2.12
+feedparser==5.2.1
 streamlit-aggrid == 0.3.4
-feedparser==6.0.10
 pygooglenews == 0.1.2
