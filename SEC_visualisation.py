@@ -8,12 +8,15 @@ import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import time
 
+from st_aggrid import AgGrid, GridUpdateMode
+from st_aggrid.grid_options_builder import GridOptionsBuilder
 
 import geopandas as gpd
 import folium
 
 import streamlit as st
 from streamlit_folium import st_folium
+
 
 import yfinance as yf
 from pygooglenews import GoogleNews
@@ -118,7 +121,7 @@ def comapnyFolium(company,info_df,cols):
     company_df = info_df[company]
     longitude = company_df.iloc[3]
     latitude = company_df.iloc[2]
-    st.write(" -\n".join([company[0],company_df.iloc[0][0]]))
+
     loc = folium.Map(location=[longitude,latitude], zoom_start=10,)
     folium.Marker(
         [longitude, latitude], 
@@ -132,9 +135,39 @@ def comapnyFolium(company,info_df,cols):
 
     return map
 
-def companyDataframe(company,statement2look):
+def companyDataframeSelect(company,statement2look,df):
     data = df[company[0]][statement2look].T.sort_index(axis=1, ascending=False)
-    return st.dataframe(data)
+    data['Tag'] = data.index
+
+    data = data.reset_index(drop=True)
+
+    # Move the 'index' column to the first position
+    data = data[['Tag'] + [col for col in data.columns if col != 'Tag']]
+    gb = GridOptionsBuilder.from_dataframe(data)
+    gb.configure_side_bar() #Add a sidebar
+    gb.configure_selection('multiple', use_checkbox=True, groupSelectsChildren="Group checkbox select children") #Enable multi-row selection
+    gb.configure_column("Tag", pinned="left", auto_size=True)
+    gridOptions = gb.build()
+
+    grid_response = AgGrid(
+        data,
+        gridOptions=gridOptions,
+        data_return_mode='AS_INPUT',
+        update_mode='MODEL_CHANGED', 
+        fit_columns_on_grid_load=False,
+        theme='streamlit',
+        enable_enterprise_modules=True, 
+        width='100%',
+        reload_data=True,
+        
+    )
+
+    return pd.DataFrame(grid_response["selected_rows"]).set_index("Tag").drop("_selectedRowNodeInfo",axis=1)
+
+def companyDataframe(company,statement2look,df):
+    df = df[company[0]][statement2look].T.sort_index(axis=1, ascending=False)
+    
+    return st.dataframe(df)
 
 @np.vectorize
 def timeString2float(x="2020q2"):
@@ -197,7 +230,7 @@ df = pd.read_csv("data/SEC_data.csv",index_col=[0,1,2],header=[0]).T
 info_df = pd.read_csv('data/company_info.csv')
 options = sorted(set([i[0] for i in set(list(df.columns))]))
 
-cols = st.columns((4,10,4))
+cols = st.columns((6,15,7))
 
 with cols[0]:
     company = st.multiselect(label="Search for company",options=options, max_selections=1)
@@ -209,51 +242,32 @@ except:
     pass
 
 
-def plotCompanyTag(companies="1 800 FLOWERS COM INC",tags="Assets"):
-
+def plotCompanyTag(companies, rows):
     @np.vectorize
-    def timeString2float(x="2020q2"):
+    def timeString2date(x="2020q2"):
         lst = x.split("q")
-        num = int(lst[0])+(int(lst[1])-1)*0.25
-        return num
+        return datetime.strptime(f"{lst[0]}-{int(lst[1])*3}-15", "%Y-%m-%d")
 
+    if len(rows) > 1:
+        fig = make_subplots(rows=len(rows), cols=1, shared_xaxes=True, vertical_spacing=0.05)
 
-    if len(tags)>1:
-        fig, ax = plt.subplots(len(tags),1,figsize=(10,8),dpi=300)
+        for i in range(len(rows)):
+            y = df.loc[rows[i]]
+            x = df.columns[::-1]
+            fig.add_trace(go.Line(x=x, y=y, name=rows[i], showlegend=False), row=i + 1, col=1)
 
-        for i in range(len(tags)):
-            for company in companies:
-                y = df[company][tags[i]].values
-                x = timeString2float(np.array(df[company][tags[i]].index))
+            fig.update_yaxes(title_text=rows[i], row=i + 1, col=1)
 
-                sort_index = np.argsort(x)
-
-                x = x[sort_index]
-                y = y[sort_index]
-
-                ax[i].plot(x,y,label=company)
-
-                ax[i].legend()
-                ax[i].set_ylabel(tags[i])
     else:
-        fig, ax = plt.subplots(1,1,figsize=(16,6),dpi=300)
-        for company in companies:
-            y = df[company][stmts_selected[0]][tags[0]].values
-            
-            x = timeString2date(np.array(df[company][stmts_selected[0]][tags[0]].index))
-            x = pd.to_datetime(x)
+        fig = go.Figure()
+        y = df.loc[rows[0]]
+        x = df.columns[::-1]
+        fig.add_trace(go.Line(x=x, y=y, name=rows[0]))
 
-            sort_index = np.argsort(x)
+        fig.update_yaxes(title_text=rows[0])
 
-            x = x[sort_index]
-            y = y[sort_index]
-
-            ax.plot(x,y,label=company)
-
-            ax.legend()
-            ax.set_ylabel(tags[0])
-    fig.tight_layout()
-    st.pyplot(fig)
+    fig.update_layout(height=1000, width=1000, template='ggplot2')
+    st.plotly_chart(fig)
 
 
 def plotStock(company_df,stock,period,interval,window,placeholder="No"):
@@ -275,11 +289,12 @@ def plotStock(company_df,stock,period,interval,window,placeholder="No"):
                     close=df['Close'], name = 'market data'), 
                 row=1, col=1)
     
-    fig.add_trace(go.Line(x=df.index,
+    fig.add_trace(go.Scatter(x=df.index,
                              y=df['Close'],
                             name = 'market data fill',
                             visible="legendonly",
-                            fill='tozeroy'), 
+                            fill='tonexty'
+                            ), 
                 row=1, col=1)
 
     # Moving average
@@ -378,29 +393,55 @@ with cols[1]:
             elif period == "max":
                 plotStock(company_df,stock,"max","1mo",window,placeholder)
 
-            dic = dict()
-            gn = GoogleNews()
-            s = gn.search(f'{company} {stock} stock news')
-            news_dict = dict()
-            for entry in s["entries"]:
-                news_dict[entry['published']] = f"[{entry['title']}]({entry['link']})"
-            sorted_dict = dict(sorted(news_dict.items(), key=lambda x: datetime.strptime(x[0], '%a, %d %b %Y %H:%M:%S %Z'),reverse=True))          
-            for news in sorted_dict.values():
-                if "apple" in news.lower():
-                    st.write(news)
 
             
     except:
         pass
 
+
 try:
     with cols[2]:
-        fig = plt.figure()
-        plt.plot(df[company[0]]["BS"].index,df[company[0]]["BS"]["Assets"].values)
-        st.pyplot(fig)
-        plt.close()
+        
+        dic = dict()
+        news_list = list()
+        gn = GoogleNews()
+        s = gn.search(f'{company} {stock} stock news')
+        news_dict = dict()
+        for entry in s["entries"]:
+            news_dict[entry['published']] = f"[{entry['title']}]({entry['link']})"
+        sorted_dict = dict(sorted(news_dict.items(), key=lambda x: datetime.strptime(x[0], '%a, %d %b %Y %H:%M:%S %Z'),reverse=True))          
+        for news in sorted_dict.values():
+            news_list.append(news)
+       
+
+        with st.expander(f"{company[0]} news"):
+            news_content = st.empty()
+            
+            news_content.markdown("\n \n".join(news_list[:10]), unsafe_allow_html=True)
+
+            button_placeholder = st.empty()
+
+            view_more_button = button_placeholder.button("View More")
+
+            if view_more_button:
+                news_content.markdown("\n \n".join(news_list), unsafe_allow_html=True)
+                
+                view_less_button = button_placeholder.button("View Less")
+
+                if view_less_button:
+                    news_content.markdown("\n \n".join(news_list[:10]), unsafe_allow_html=True)
+                    
+                    button_placeholder.button("View More")
+
+
+
 except:
     pass
+
+#fig = plt.figure()
+#plt.plot(df[company[0]]["BS"].index,df[company[0]]["BS"]["Assets"].values)
+#st.pyplot(fig)
+#plt.close()
 
 stmt_dic = {"BS" : "Balance Sheet", "IS" : "Income Statement", "CF" : "Cash Flow", "EQ" : "Equity",
 "CI": "Comprehensive Income", "UN" : "Unclassifiable Statement", "CP" :"Cover Page"}
@@ -409,15 +450,13 @@ inv_stmt_dic = {v: k for k, v in stmt_dic.items()}
 
 try:
     if type(company[0]) == str:
-        with st.expander("Finacial Data"):
+        with st.expander(f"{company[0]} finacial Data"):
             st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center}</style>', unsafe_allow_html=True)
             statement2look = inv_stmt_dic[st.radio(options=inv_stmt_dic.keys(),label= "Statement")]
 
             # try to plot company financial data
-            try:
-                companyDataframe(company,statement2look)
-            except:
-                st.write("No data")
+            df = companyDataframeSelect(company,statement2look,df)
+            plotCompanyTag(df,df.index.values.tolist())
     else:
         pass
 except:
