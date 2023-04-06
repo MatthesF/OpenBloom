@@ -410,7 +410,7 @@ def plotCompanyTag(companies, rows):
         fig = go.Figure()
         y = df.loc[rows[0]]
         x = df.columns[::-1]
-        fig.add_trace(go.Line(x=x, y=y, name=rows[0]))
+        fig.add_trace(go.scatter.Line(x=x, y=y, name=rows[0]))
 
         fig.update_yaxes(title_text=rows[0])
 
