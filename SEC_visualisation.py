@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import plotly.graph_objs as go 
 from plotly.subplots import make_subplots
+import plotly.express as px
 import time
 
 import feedparser
@@ -397,12 +398,12 @@ def plotCompanyTag(companies, rows):
         return datetime.strptime(f"{lst[0]}-{int(lst[1])*3}-15", "%Y-%m-%d")
 
     if len(rows) > 1:
-        fig = make_subplots(rows=len(rows), cols=1, shared_xaxes=True, vertical_spacing=0.05)
+        fig = make_subplots(rows=len(rows), cols=1, shared_xaxes=False, vertical_spacing=0.05)
 
         for i in range(len(rows)):
             y = df.loc[rows[i]]
             x = df.columns[::-1]
-            fig.add_trace(go.scatter.Line(x=x, y=y, name=rows[i], showlegend=False), row=i + 1, col=1)
+            fig.add_trace(go.Scatter(x=x, y=y, name=rows[i], mode="lines", showlegend=False), row=i + 1, col=1)
 
             fig.update_yaxes(title_text=rows[i], row=i + 1, col=1)
 
@@ -410,7 +411,7 @@ def plotCompanyTag(companies, rows):
         fig = go.Figure()
         y = df.loc[rows[0]]
         x = df.columns[::-1]
-        fig.add_trace(go.scatter.Line(x=x, y=y, name=rows[0]))
+        fig.add_trace(go.Scatter(x=x, y=y,mode="lines", name=rows[0]))
 
         fig.update_yaxes(title_text=rows[0])
 
